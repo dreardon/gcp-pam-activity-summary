@@ -7,6 +7,10 @@ The goal of this project is to:
 - Summarize User Activity: Generate a concise summary of the actions performed by the user during the grant period.
 - Send a Notification: Email a summary of the activty to a user/group in the organization responsible for periodically reviewing user activity.
 
+### Architecture
+![GCP PAM Activity Summarization Architecture](images/gcp_pam_summarization.png)
+
+
 ### Setup PAM Summarization Project
 ```bash
 #Setup Variables
