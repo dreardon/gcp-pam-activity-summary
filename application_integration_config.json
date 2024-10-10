@@ -1,0 +1,99 @@
+{
+    "triggerConfigs": [{
+      "label": "API Trigger",
+      "startTasks": [{
+        "taskId": "1"
+      }],
+      "properties": {
+        "Trigger name": "pam-summary-email"
+      },
+      "triggerType": "API",
+      "triggerNumber": "1",
+      "triggerId": "api_trigger/pam-summary-email"
+    }],
+    "taskConfigs": [{
+      "task": "EmailTask",
+      "taskId": "1",
+      "parameters": {
+        "Cc": {
+          "key": "Cc",
+          "value": {
+            "stringArray": {
+            }
+          }
+        },
+        "TextBody": {
+          "key": "TextBody",
+          "value": {
+            "stringValue": "$email_content$"
+          }
+        },
+        "Bcc": {
+          "key": "Bcc",
+          "value": {
+            "stringArray": {
+            }
+          }
+        },
+        "AttachmentPath": {
+          "key": "AttachmentPath",
+          "value": {
+            "stringArray": {
+            }
+          }
+        },
+        "ThrowNoRequiredInputException": {
+          "key": "ThrowNoRequiredInputException",
+          "value": {
+            "booleanValue": true
+          }
+        },
+        "To": {
+          "key": "To",
+          "value": {
+            "stringArray": {
+              "stringValues": ["$recipient$"]
+            }
+          }
+        },
+        "Subject": {
+          "key": "Subject",
+          "value": {
+            "stringValue": "PAM Activity Summary for $pam_user$"
+          }
+        },
+        "BodyFormat": {
+          "key": "BodyFormat",
+          "value": {
+            "stringValue": "html"
+          }
+        },
+        "EmailConfigInput": {
+          "key": "EmailConfigInput",
+          "value": {
+            "jsonValue": "{\n  \"@type\": \"type.googleapis.com/enterprise.crm.eventbus.proto.EmailConfig\"\n}"
+          }
+        }
+      },
+      "taskExecutionStrategy": "WHEN_ALL_SUCCEED",
+      "displayName": "Send Email",
+      "externalTaskType": "NORMAL_TASK"
+    }],
+    "integrationParameters": [{
+      "key": "email_content",
+      "dataType": "STRING_VALUE",
+      "displayName": "email_content",
+      "masked": true,
+      "description": "Email content to be sent"
+    }, {
+      "key": "recipient",
+      "dataType": "STRING_VALUE",
+      "displayName": "recipient",
+      "description": "Email recipient"
+    }, {
+      "key": "pam_user",
+      "dataType": "STRING_VALUE",
+      "displayName": "pam_user"
+    }],
+    "userLabel": "2"
+  }
