@@ -51,6 +51,7 @@ printf 'y' |  gcloud services enable run.googleapis.com
 printf 'y' |  gcloud services enable cloudfunctions.googleapis.com
 printf 'y' |  gcloud services enable aiplatform.googleapis.com
 printf 'y' |  gcloud services enable integrations.googleapis.com
+printf 'y' |  gcloud services enable cloudasset.googleapis.com
 
 gcloud auth application-default set-quota-project ${PROJECT_ID}
 ```
@@ -106,6 +107,7 @@ gcloud functions deploy ${CLOUD_RUN_SERVICE} \
 --ingress-settings=internal-only \
 --no-allow-unauthenticated \
 --trigger-http \
+--memory=512M \
 --set-env-vars PROJECT_ID=${PROJECT_ID},SUMMARY_RECIPIENT=${SUMMARY_RECIPIENT},REGION=${REGION}
 
 gcloud iam service-accounts create ${CLOUD_RUN_SERVICE}-invoker \

@@ -8,6 +8,7 @@ from vertexai.generative_models import GenerativeModel
 from google.cloud import logging
 from google.cloud import privilegedaccessmanager_v1
 from google.cloud.logging import DESCENDING
+from google.cloud.asset_v1 import AssetServiceClient, SearchAllResourcesRequest
 from flask import Flask, request
 import google
 import google.oauth2.credentials
@@ -36,12 +37,11 @@ def index(*args, **kwargs):
     if isinstance(pubsub_message, dict) and "data" in pubsub_message:
         name = base64.b64decode(pubsub_message["data"]).decode("utf-8").strip()
         message = json.loads(name)
-        project_id = message['resource']['labels']['project_id']
         grant_message = message['protoPayload']['resourceName']
     
     grant = get_pam_grants(grant_message)
     grantee = grant['requester']
-    activity = get_pam_activities(grant,project_id)
+    activity = get_pam_activities(grant)
     summary = generate_summary(summary_project_id, activity)
     send_notification(grantee,summary)
 
@@ -52,7 +52,6 @@ def get_pam_grants(grant_message):
     
     result = pam_client.get_grant(name=grant_message)
 
-    # Handle the response
     grant = {}
     grant['name'] = result.name
     grant['requester'] = result.requester
@@ -63,13 +62,11 @@ def get_pam_grants(grant_message):
     grant['roles_scope'] = result.privileged_access.gcp_iam_access.resource or ""
     grant['start_time'] = result.audit_trail.access_grant_time.isoformat() or ""
     grant['end_time'] = result.audit_trail.access_remove_time.isoformat() or ""
-    #print('grant', grant)
     return grant
 
-def get_pam_activities(grant,project_id):
-    
-    client = logging.Client(project=project_id)
+def get_pam_activities(grant):
     current_grant = grant
+    current_grant['activities'] = []
     start_datetime=grant.get('start_time')
     end_datetime=grant.get('end_time', "")
     FILTER = '''
@@ -79,19 +76,35 @@ def get_pam_activities(grant,project_id):
 
     print('Log Filter Used:', FILTER)
 
-    iterator = client.list_entries(filter_=FILTER, order_by=DESCENDING)
-    current_grant['activities'] = []
-    for entry in iterator:
-        entry = entry.to_api_repr()
-        activity = {}
-        activity["service_name"] = entry['protoPayload']['serviceName']
-        activity["method_name"] = entry['protoPayload']['methodName']
-        activity["resource_name"] = entry.get('protoPayload', {}).get('resourceName', "")
-        activity["timestamp"] = entry['timestamp']
-        #activity["raw"] = entry
-        current_grant["activities"].append(activity)
-    return current_grant
+    client = AssetServiceClient()
+    grant_scope = grant['roles_scope'].replace('//cloudresourcemanager.googleapis.com/','')
+    request = SearchAllResourcesRequest(
+        scope=grant_scope,
+        asset_types=[
+            "cloudresourcemanager.googleapis.com/Project",
+        ],
+        query="state:ACTIVE",
+    )
 
+    paged_results = client.search_all_resources(request=request)
+
+    for response in paged_results:
+        project_id = response.name.split("/")[4]
+        client = logging.Client(project=project_id)
+        iterator = client.list_entries(filter_=FILTER, order_by=DESCENDING)
+        for entry in iterator:
+            entry = entry.to_api_repr()
+            activity = {}
+            activity["project_name"] = response.display_name
+            activity["project_id"] = project_id
+            activity["service_name"] = entry['protoPayload']['serviceName']
+            activity["method_name"] = entry['protoPayload']['methodName']
+            activity["resource_name"] = entry.get('protoPayload', {}).get('resourceName', "")
+            activity["timestamp"] = entry['timestamp']
+            #activity["raw"] = entry
+            current_grant["activities"].append(activity)
+
+    return current_grant
 
 def generate_summary(summary_project_id, activity):
 
