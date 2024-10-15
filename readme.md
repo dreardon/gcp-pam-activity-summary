@@ -9,7 +9,7 @@ The goal of this project is to:
 
 ### Architecture
 ![GCP PAM Activity Summarization Architecture](images/gcp_pam_summarization.png)
-
+![Email Summary Example](images/email_summary.png)
 
 ### Setup PAM Summarization Project
 ```bash
