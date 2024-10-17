@@ -1,19 +1,20 @@
 import json
 import base64
-import vertexai
 import os
-import markdown
 import requests
+from datetime import datetime
+import markdown
+import vertexai
 from vertexai.generative_models import GenerativeModel
-from google.cloud import logging
-from google.cloud import privilegedaccessmanager_v1
+from google.api_core.exceptions import NotFound
+from google.cloud import logging, bigquery, privilegedaccessmanager_v1
 from google.cloud.logging import DESCENDING
 from google.cloud.asset_v1 import AssetServiceClient, SearchAllResourcesRequest
+from googleapiclient.discovery import build
 from flask import Flask, request
-import google
-import google.oauth2.credentials
-from google.auth import compute_engine
 import google.auth.transport.requests
+from google.auth import compute_engine
+
 
 app = Flask(__name__)
 
@@ -25,12 +26,12 @@ summary_recipient = os.environ.get("SUMMARY_RECIPIENT", "Summary recipient not s
 def index(*args, **kwargs):
     envelope = request.get_json()
     if not envelope:
-        msg = "No Pub/Sub message received"
+        msg = "No Pub/Sub Message Received"
         print(f"error: {msg}")
         return f"Bad Request: {msg}", 400
 
     if not isinstance(envelope, dict) or "message" not in envelope:
-        msg = "invalid Pub/Sub message format"
+        msg = "Invalid Pub/Sub Message Format"
         return f"Bad Request: {msg}", 400
     pubsub_message = envelope["message"]
     
@@ -41,11 +42,101 @@ def index(*args, **kwargs):
     
     grant = get_pam_grants(grant_message)
     grantee = grant['requester']
-    activity = get_pam_activities(grant)
-    summary = generate_summary(summary_project_id, activity)
-    send_notification(grantee,summary)
+    if grant['state'] in ['ACTIVE']:
+        create_log_router_and_destination(grant)
+    elif grant['state'] in ['REVOKED','ENDED']:
+        delete_log_router(grant)
+        activity = get_pam_activities(grant)
+        summary = generate_summary(summary_project_id, activity)
+        send_notification(grantee,summary)
+    else:
+        print('PAM Message State must be "ACTIVE","ENDED", or "REVOKED", the status was:',grant['state'])
 
     return ("PAM Grant Summary Processed Successfully", 200)
+
+def delete_log_router(grant):
+    logging_client = logging.Client()
+    sink_name = 'grant_'+custom_startdate+'_'+grant['name'].split('/')[-1].replace('-','_')
+    dataset_id = "{}.{}".format(summary_project_id,sink_name)
+    dataset = bigquery.Dataset(dataset_id)
+    
+    #Delete Log Sink
+    try:
+        destination = "bigquery.googleapis.com/projects/{0}/datasets/{1}".format(summary_project_id,dataset.dataset_id)
+        sink_scope = grant['roles_scope'].replace('//cloudresourcemanager.googleapis.com/','')
+
+        sink = logging.Sink(
+            sink_name,
+            parent=sink_scope,
+            client=logging_client)
+
+        sink.delete()
+        print("Deleted sink {}".format(sink.name))
+    except NotFound:
+         print("Sink {} not found, skipping deletion".format(sink.name))
+    except Exception as e:
+        print(e)
+        print('Exception Type is:', e.__class__.__name__)
+        pass
+
+def create_log_router_and_destination(grant):
+    logging_client = build('logging', 'v2')
+    bigquery_client = bigquery.Client()
+    custom_startdate = datetime.fromisoformat(grant['start_time']).strftime('%Y%m%d_%H%M%S')
+    sink_name = 'grant_'+custom_startdate+'_'+grant['name'].split('/')[-1].replace('-','_')
+    dataset_id = "{}.{}".format(summary_project_id,sink_name)
+    
+    #Create BigQuery Dataset
+    try:
+        dataset = bigquery.Dataset(dataset_id)
+        dataset.location = region
+        dataset.description = "PAM grant activity dataset for {} when given the grant {}".format(grant['requester'], grant['name'])
+        dataset = bigquery_client.create_dataset(dataset, timeout=30)
+        print("Created dataset {}.{}".format(summary_project_id, dataset.dataset_id))
+    except Exception as e:
+        print(e)
+        print('Exception Type is:', e.__class__.__name__)
+        pass
+
+    #Create Log Sink
+    destination = "bigquery.googleapis.com/projects/{0}/datasets/{1}".format(summary_project_id,dataset.dataset_id)
+    sink_scope = grant['roles_scope'].replace('//cloudresourcemanager.googleapis.com/','')
+    include_children = False
+    if sink_scope.split('/')[1] != 'projects':
+        include_children = True
+    try:
+        FILTER = '''
+            protoPayload.authenticationInfo.principalEmail={0}
+            '''.format(grant['requester'])
+
+        sink = logging_client.sinks().create(parent=sink_scope,uniqueWriterIdentity=True,
+            body={
+                'name':sink_name,
+                'filter':FILTER,
+                'destination':destination,
+                'includeChildren':include_children
+            }).execute()
+
+        print("Created sink {} at {}".format(sink['name'],sink_scope))
+    except Exception as e:
+        print(e)
+        print('Exception Type is:', e.__class__.__name__)
+        pass
+
+    #Give Log Sink Write Permissions to Dataset
+    try:
+        role = "roles/bigquery.dataEditor"
+        access_entries = dataset.access_entries
+        access_entries.append(
+            bigquery.AccessEntry(role, "userByEmail", sink['writerIdentity'].split(':')[1])
+        )
+        dataset.access_entries = access_entries
+        dataset = bigquery_client.update_dataset(dataset, ["access_entries"])
+        print(f"Role {role} granted to {sink['writerIdentity']} on dataset {dataset.full_dataset_id}")
+    except Exception as e:
+        print(e)
+        print('Exception Type is:', e.__class__.__name__)
+        pass
 
 def get_pam_grants(grant_message):
     pam_client = privilegedaccessmanager_v1.PrivilegedAccessManagerClient()
@@ -61,7 +152,10 @@ def get_pam_grants(grant_message):
     grant['roles'] = result.privileged_access.gcp_iam_access.role_bindings[0].role or ""
     grant['roles_scope'] = result.privileged_access.gcp_iam_access.resource or ""
     grant['start_time'] = result.audit_trail.access_grant_time.isoformat() or ""
-    grant['end_time'] = result.audit_trail.access_remove_time.isoformat() or ""
+    try:
+        grant['end_time'] = result.audit_trail.access_remove_time.isoformat()
+    except Exception as e:
+        grant['end_time'] = ""
     return grant
 
 def get_pam_activities(grant):
@@ -74,9 +168,7 @@ def get_pam_activities(grant):
         timestamp>="{1}" AND timestamp<="{2}"
         '''.format(grant['requester'],start_datetime,end_datetime)
 
-    print('Log Filter Used:', FILTER)
-
-    client = AssetServiceClient()
+    cai_client = AssetServiceClient()
     grant_scope = grant['roles_scope'].replace('//cloudresourcemanager.googleapis.com/','')
     request = SearchAllResourcesRequest(
         scope=grant_scope,
@@ -86,12 +178,12 @@ def get_pam_activities(grant):
         query="state:ACTIVE",
     )
 
-    paged_results = client.search_all_resources(request=request)
+    paged_results = cai_client.search_all_resources(request=request)
 
     for response in paged_results:
         project_id = response.name.split("/")[4]
-        client = logging.Client(project=project_id)
-        iterator = client.list_entries(filter_=FILTER, order_by=DESCENDING)
+        logging_client = logging.Client(project=project_id)
+        iterator = logging_client.list_entries(filter_=FILTER, order_by=DESCENDING)
         for entry in iterator:
             entry = entry.to_api_repr()
             activity = {}
@@ -152,7 +244,7 @@ def send_notification(grantee, summary):
     
     headers = {"Authorization": "Bearer " + access_token, "Content-Type": "application/json"} 
     response = requests.post(app_int_endpoint, json=app_int_config, headers=headers)
-    print('Sent Notification', response)
+    print('Sent Notification')
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))

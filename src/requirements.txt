@@ -1,7 +1,9 @@
 functions-framework==3.8.1
+google-api-python-client==2.149.0
 google-cloud-logging==3.11.2
 google-cloud-privilegedaccessmanager==0.1.1
 google-cloud-asset==3.26.4
+google-cloud-bigquery==3.26.0
 google-cloud-aiplatform==1.69.0
 Flask==3.0.3
 gunicorn==22.0.0

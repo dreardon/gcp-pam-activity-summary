@@ -42,28 +42,31 @@ gcloud beta billing projects link ${PROJECT_ID} --billing-account=${BILLING_ACCO
 
 gcloud config set project ${PROJECT_ID}
 
+gcloud auth application-default set-quota-project ${PROJECT_ID}
+
 printf 'y' |  gcloud services enable cloudresourcemanager.googleapis.com
 printf 'y' |  gcloud services enable container.googleapis.com
 printf 'y' |  gcloud services enable artifactregistry.googleapis.com
 printf 'y' |  gcloud services enable cloudbuild.googleapis.com
+printf 'y' |  gcloud services enable bigquery.googleapis.com
 printf 'y' |  gcloud services enable containerscanning.googleapis.com
 printf 'y' |  gcloud services enable run.googleapis.com
 printf 'y' |  gcloud services enable cloudfunctions.googleapis.com
 printf 'y' |  gcloud services enable aiplatform.googleapis.com
 printf 'y' |  gcloud services enable integrations.googleapis.com
 printf 'y' |  gcloud services enable cloudasset.googleapis.com
-
-gcloud auth application-default set-quota-project ${PROJECT_ID}
 ```
 
 ### Setup Targetted Org-level Log Sink to Pub/Sub Topic
 ```bash
 gcloud pubsub topics create $TOPIC_ID
 
+#Capture Active Grant or Other Terminal Grant State
 gcloud logging sinks create $SINK_NAME \
   pubsub.googleapis.com/projects/${PROJECT_ID}/topics/${TOPIC_ID} --include-children \
   --organization=$ORGANIZATION_ID \
-  --log-filter="proto_payload.method_name="PAMEndGrant""
+  --log-filter="proto_payload.method_name=("PAMActivateGrant" OR "PAMEndGrant" OR "google.cloud.privilegedaccessmanager.v1alpha.PrivilegedAccessManager.RevokeGrant")"
+
 
 gcloud pubsub topics add-iam-policy-binding $TOPIC_ID \
 --member=serviceAccount:service-org-${ORGANIZATION_ID}@gcp-sa-logging.iam.gserviceaccount.com \
@@ -74,10 +77,15 @@ gcloud projects add-iam-policy-binding ${PROJECT_ID} \
 --member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
 --role='roles/logging.logWriter'
 
+#Allow Cloud Run Service Account to Generate Log Summary in Gemini
 gcloud projects add-iam-policy-binding ${PROJECT_ID} \
 --member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
 --role='roles/aiplatform.user'
 
+#Allow Cloud Run Service Account to Create BQ Grant-based Datasets
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/bigquery.user'
 
 ### Org-level Cloud Run Service Account Permissions
 gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
@@ -87,7 +95,17 @@ gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
 
 gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
 --member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/cloudasset.viewer' \
+--condition='None'
+
+gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
 --role='roles/logging.viewer' \
+--condition='None'
+
+gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/logging.configWriter' \
 --condition='None'
 ```
 
@@ -173,7 +191,17 @@ gcloud organizations remove-iam-policy-binding ${ORGANIZATION_ID} \
 
 gcloud organizations remove-iam-policy-binding ${ORGANIZATION_ID} \
 --member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/cloudasset.viewer' \
+--condition='None'
+
+gcloud organizations remove-iam-policy-binding ${ORGANIZATION_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
 --role='roles/logging.viewer' \
+--condition='None'
+
+gcloud organizations remove-iam-policy-binding ${ORGANIZATION_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/logging.configWriter' \
 --condition='None'
 
 printf 'y' |  gcloud projects delete ${PROJECT_ID}
