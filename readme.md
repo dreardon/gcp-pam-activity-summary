@@ -67,46 +67,9 @@ gcloud logging sinks create $SINK_NAME \
   --organization=$ORGANIZATION_ID \
   --log-filter="proto_payload.method_name=("PAMActivateGrant" OR "PAMEndGrant" OR "google.cloud.privilegedaccessmanager.v1alpha.PrivilegedAccessManager.RevokeGrant")"
 
-
 gcloud pubsub topics add-iam-policy-binding $TOPIC_ID \
 --member=serviceAccount:service-org-${ORGANIZATION_ID}@gcp-sa-logging.iam.gserviceaccount.com \
 --role='roles/pubsub.publisher'
-
-### Project-level Cloud Run Service Account Permissions
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
---member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
---role='roles/logging.logWriter'
-
-#Allow Cloud Run Service Account to Generate Log Summary in Gemini
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
---member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
---role='roles/aiplatform.user'
-
-#Allow Cloud Run Service Account to Create BQ Grant-based Datasets
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
---member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
---role='roles/bigquery.user'
-
-### Org-level Cloud Run Service Account Permissions
-gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
---member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
---role='roles/privilegedaccessmanager.viewer' \
---condition='None'
-
-gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
---member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
---role='roles/cloudasset.viewer' \
---condition='None'
-
-gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
---member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
---role='roles/logging.viewer' \
---condition='None'
-
-gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
---member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
---role='roles/logging.configWriter' \
---condition='None'
 ```
 
 ### Deploy Cloud Run Function and Pub/Sub Subscription
@@ -146,6 +109,44 @@ gcloud pubsub subscriptions create pam-event-subscription --topic ${TOPIC_ID} \
 --push-auth-service-account=${CLOUD_RUN_SERVICE}-invoker@${PROJECT_ID}.iam.gserviceaccount.com
 ```
 
+### Cloud Run Permissions
+```bash
+#Org-level Cloud Run Service Account Permissions
+gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/privilegedaccessmanager.viewer' \
+--condition='None'
+
+gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/cloudasset.viewer' \
+--condition='None'
+
+gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/logging.viewer' \
+--condition='None'
+
+gcloud organizations add-iam-policy-binding ${ORGANIZATION_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/logging.configWriter' \
+--condition='None'
+
+#Project-level Cloud Run Service Account Permissions
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/logging.logWriter'
+
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/aiplatform.user'
+
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+--member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+--role='roles/bigquery.user'
+
+```
+
 ### Create Application Integration Specification for Email Summaries
 ```bash
 #Create Application Integration in Region
@@ -168,7 +169,7 @@ curl -X POST \
 -H "Content-Type: application/json" \
 "https://${REGION}-integrations.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/integrations/pam-summary-email/versions/${version}/:publish"
 
-## Application Integration Email Summary
+#Application Integration Email Summary
 gcloud projects add-iam-policy-binding $PROJECT_ID \
    --member=serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
    --role=roles/integrations.integrationInvoker
