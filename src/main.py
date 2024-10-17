@@ -56,6 +56,7 @@ def index(*args, **kwargs):
 
 def delete_log_router(grant):
     logging_client = logging.Client()
+    custom_startdate = datetime.fromisoformat(grant['start_time']).strftime('%Y%m%d_%H%M%S')
     sink_name = 'grant_'+custom_startdate+'_'+grant['name'].split('/')[-1].replace('-','_')
     dataset_id = "{}.{}".format(summary_project_id,sink_name)
     dataset = bigquery.Dataset(dataset_id)
